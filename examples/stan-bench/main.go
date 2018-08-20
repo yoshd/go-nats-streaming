@@ -35,12 +35,13 @@ const (
 	DefaultAsync              = false
 	DefaultMessageSize        = 128
 	DefaultIgnoreOld          = false
+	DefaultQueueSubscribe     = false
 	DefaultMaxPubAcksInflight = 1000
 	DefaultClientID           = "benchmark"
 )
 
 func usage() {
-	log.Fatalf("Usage: stan-bench [-s server (%s)] [--tls] [-id CLIENT_ID] [-np NUM_PUBLISHERS] [-ns NUM_SUBSCRIBERS] [-n NUM_MSGS] [-ms MESSAGE_SIZE] [-csv csvfile] [-mpa MAX_NUMBER_OF_PUBLISHED_ACKS_INFLIGHT] [-io] [-a] <subject>\n", nats.DefaultURL)
+	log.Fatalf("Usage: stan-bench [-s server (%s)] [--tls] [-id CLIENT_ID] [-np NUM_PUBLISHERS] [-ns NUM_SUBSCRIBERS] [-n NUM_MSGS] [-ms MESSAGE_SIZE] [-csv csvfile] [-mpa MAX_NUMBER_OF_PUBLISHED_ACKS_INFLIGHT] [-io] [-q] [-a] <subject>\n", nats.DefaultURL)
 }
 
 var benchmark *bench.Benchmark
@@ -58,6 +59,7 @@ func main() {
 	var async = flag.Bool("a", DefaultAsync, "Async message publishing")
 	var messageSize = flag.Int("ms", DefaultMessageSize, "Message size in bytes.")
 	var ignoreOld = flag.Bool("io", DefaultIgnoreOld, "Subscribers ignore old messages")
+	var queueSubscribe = flag.Bool("q", DefaultQueueSubscribe, "Subscribers get messages from queue group")
 	var maxPubAcks = flag.Int("mpa", DefaultMaxPubAcksInflight, "Max number of published acks in flight")
 	var clientID = flag.String("id", DefaultClientID, "Benchmark process base client ID")
 	var csvFile = flag.String("csv", "", "Save bench data to csv file")
@@ -91,7 +93,7 @@ func main() {
 	startwg.Add(*numSubs)
 	for i := 0; i < *numSubs; i++ {
 		subID := fmt.Sprintf("%s-sub-%d", *clientID, i)
-		go runSubscriber(&startwg, &donewg, opts, clusterID, *numMsgs, *messageSize, *ignoreOld, subID)
+		go runSubscriber(&startwg, &donewg, opts, clusterID, *numMsgs, *messageSize, *ignoreOld, *queueSubscribe, subID)
 	}
 	startwg.Wait()
 
@@ -177,7 +179,7 @@ func runPublisher(startwg, donewg *sync.WaitGroup, opts nats.Options, clusterID 
 	donewg.Done()
 }
 
-func runSubscriber(startwg, donewg *sync.WaitGroup, opts nats.Options, clusterID string, numMsgs int, msgSize int, ignoreOld bool, subID string) {
+func runSubscriber(startwg, donewg *sync.WaitGroup, opts nats.Options, clusterID string, numMsgs, msgSize int, ignoreOld, queueSubscribe bool, subID string) {
 	nc, err := opts.Connect()
 	if err != nil {
 		log.Fatalf("Subscriber %s can't connect: %v\n", subID, err)
@@ -207,6 +209,8 @@ func runSubscriber(startwg, donewg *sync.WaitGroup, opts nats.Options, clusterID
 
 	if ignoreOld {
 		snc.Subscribe(subj, mcb)
+	} else if queueSubscribe {
+		snc.QueueSubscribe(subj, "test-group", mcb)
 	} else {
 		snc.Subscribe(subj, mcb, stan.DeliverAllAvailable())
 	}
